@@ -37,17 +37,26 @@ void putpoints(PyArrayObject* grid, PyArrayObject* points, float L, int radius) 
         int min_y = 0;
         int min_x = 0;
         float best = std::numeric_limits<float>::max();
-        for (int y = 0; y != rows; ++y) {
+        float local_best = std::numeric_limits<float>::max();
+        int y;
+        #pragma omp parallel for firstprivate(local_best)
+        for (y = 0; y < rows; ++y) {
             for (int x = 0; x != cols; ++x) {
                 float dist = 0.;
                 const float* gpoint = static_cast<float*>(PyArray_GETPTR2(grid, y, x));
                 for (int j = 0; j != d; ++j) {
                     dist += (p[j] - gpoint[j])*(p[j] - gpoint[j]);
                 }
-                if (dist < best) {
-                    best = dist;
-                    min_y = y;
-                    min_x = x;
+                if (dist < local_best){
+                    #pragma omp critical
+                    {
+                        if (dist < best) {
+                            best = dist;
+                            min_y = y;
+                            min_x = x;
+                        }
+                        local_best = best;
+                    }
                 }
             }
         }

@@ -24,54 +24,69 @@ void assert_type_contiguous(PyArrayObject* array,int type) {
 void putpoints(PyArrayObject* grid, PyArrayObject* points, float L, int radius) {
     if (PyArray_NDIM(grid) != 3) throw SOM_Exception("grid should be three dimensional");
     if (PyArray_NDIM(points) != 2) throw SOM_Exception("points should be two dimensional");
+
     const int rows = PyArray_DIM(grid, 0);
     const int cols = PyArray_DIM(grid, 1);
     const int d = PyArray_DIM(grid, 2);
-    const int n = PyArray_DIM(points, 0);
     if (PyArray_DIM(points, 1) != d) throw SOM_Exception("second dimension of points is not third dimension of grid");
+    const int n = PyArray_DIM(points, 0);
+
+    float best;
+    int min_y;
+    int min_x;
 
     Py_BEGIN_ALLOW_THREADS
 
-    for (int i = 0; i != n; i++){
-        const float* p = static_cast<float*>(PyArray_GETPTR1(points, i));
-        int min_y = 0;
-        int min_x = 0;
-        float best = std::numeric_limits<float>::max();
-        float local_best = std::numeric_limits<float>::max();
-        int y;
-        #pragma omp parallel for firstprivate(local_best)
-        for (y = 0; y < rows; ++y) {
-            for (int x = 0; x != cols; ++x) {
-                float dist = 0.;
-                const float* gpoint = static_cast<float*>(PyArray_GETPTR2(grid, y, x));
-                for (int j = 0; j != d; ++j) {
-                    dist += (p[j] - gpoint[j])*(p[j] - gpoint[j]);
-                }
-                if (dist < local_best){
-                    #pragma omp critical
-                    {
-                        if (dist < best) {
-                            best = dist;
-                            min_y = y;
-                            min_x = x;
-                        }
-                        local_best = best;
+    #pragma omp parallel
+    {
+        for (int i = 0; i != n; i++){
+            const float* p = static_cast<float*>(PyArray_GETPTR1(points, i));
+            float local_best = std::numeric_limits<float>::max();
+            int local_min_y = 0;
+            int local_min_x = 0;
+            int y;
+            #pragma omp for
+            for (y = 0; y < rows; ++y) {
+                for (int x = 0; x != cols; ++x) {
+                    float dist = 0.;
+                    const float* gpoint = static_cast<float*>(PyArray_GETPTR2(grid, y, x));
+                    for (int j = 0; j != d; ++j) {
+                        dist += (p[j] - gpoint[j])*(p[j] - gpoint[j]);
+                    }
+                    if (dist < local_best){
+                        local_best = dist;
+                        local_min_y = y;
+                        local_min_x = x;
                     }
                 }
             }
-        }
-        const int start_y = std::max(0, min_y - radius);
-        const int start_x = std::max(0, min_x - radius);
-        const int end_y = std::min(rows, min_y + radius);
-        const int end_x = std::min(rows, min_x + radius);
-        
-        for (int y = start_y; y != end_y; ++y) {
-            for (int x = start_x; x != end_x; ++x) {
-                const float L2 = L /(1 + std::abs(min_y - y) + std::abs(min_x - x));
-                float* gpoint = static_cast<float*>(PyArray_GETPTR2(grid, y, x));
-                for (int j = 0; j != d; ++j) {
-                    gpoint[j] *= (1.-L2);
-                    gpoint[j] += L2 * p[j];
+            best = std::numeric_limits<float>::max();
+
+            #pragma omp barrier
+            #pragma omp critical
+            {
+                if (local_best < best) {
+                    best = local_best;
+                    min_y = local_min_y;
+                    min_x = local_min_x;
+                }
+            }
+            #pragma omp barrier
+
+            const int start_y = std::max(0, min_y - radius);
+            const int start_x = std::max(0, min_x - radius);
+            const int end_y = std::min(rows, min_y + radius);
+            const int end_x = std::min(rows, min_x + radius);
+
+            #pragma omp for
+            for (y = start_y; y < end_y; ++y) {
+                for (int x = start_x; x != end_x; ++x) {
+                    const float L2 = L /(1 + std::abs(min_y - y) + std::abs(min_x - x));
+                    float* gpoint = static_cast<float*>(PyArray_GETPTR2(grid, y, x));
+                    for (int j = 0; j != d; ++j) {
+                        gpoint[j] *= (1.-L2);
+                        gpoint[j] += L2 * p[j];
+                    }
                 }
             }
         }

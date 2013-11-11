@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2010-2011, Luis Pedro Coelho <lpc@cmu.edu>
+# Copyright (C) 2010-2011, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
@@ -18,6 +18,8 @@ from __future__ import division
 import numpy as np
 import milk.supervised.tree
 from .normalise import normaliselabels
+from .base import supervised_model
+from ..utils import get_nprandom
 
 __all__ = [
     'rf_learner',
@@ -52,16 +54,19 @@ def _sample(features, labels, n, R):
         slabels.append(labels[idx])
     return np.array(sfeatures), np.array(slabels)
 
-class rf_model(object):
-    def __init__(self, forest, names):
+class rf_model(supervised_model):
+    def __init__(self, forest, names, return_label = True):
         self.forest = forest
         self.names = names
+        self.return_label = return_label
 
     def apply(self, features):
         rf = len(self.forest)
         votes = sum(t.apply(features) for t in self.forest)
-        return (votes > (rf//2))
-        
+        if self.return_label:
+            return (votes > (rf//2))
+        return votes / rf
+
 
 class rf_learner(object):
     '''
@@ -75,17 +80,20 @@ class rf_learner(object):
         Nr of trees to learn (default: 101)
     frac : float, optional
         Sample fraction
+    R : np.random object
+        Source of randomness
     '''
-    def __init__(self, rf=101, frac=.7):
+    def __init__(self, rf=101, frac=.7, R=None):
         self.rf = rf
         self.frac = frac
+        self.R = get_nprandom(R)
 
-    def train(self, features, labels, normalisedlabels=False, names=None, **kwargs):
+    def train(self, features, labels, normalisedlabels=False, names=None, return_label=True, **kwargs):
         N,M = features.shape
         m = int(self.frac*M)
-        n = int(self.frac*M)
-        R = np.random
-        tree = milk.supervised.tree.tree_learner()
+        n = int(self.frac*N)
+        R = get_nprandom(kwargs.get('R', self.R))
+        tree = milk.supervised.tree.tree_learner(return_label=return_label)
         forest = []
         if not normalisedlabels:
             labels,names = normaliselabels(labels)
@@ -95,6 +103,6 @@ class rf_learner(object):
             forest.append(
                     tree.train(*_sample(features, labels, n, R),
                                **{'normalisedlabels' : True})) # This syntax is necessary for Python 2.5
-        return rf_model(forest, names)
+        return rf_model(forest, names, return_label)
 
 

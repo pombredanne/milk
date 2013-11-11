@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 # License: MIT. See COPYING.MIT file in the milk distribution
 
 from __future__ import division
 import numpy as np
 from .normalise import normaliselabels
+from .base import supervised_model
 
 '''
 AdaBoost
@@ -35,7 +36,7 @@ def _adaboost(features, labels, base, max_iters):
     for t in xrange(max_iters):
         Ht = base.train(features, labels, weights=D)
         train_out = np.array(map(Ht.apply, features))
-        train_out = names[train_out]
+        train_out = names[train_out.astype(int)]
         Et = np.dot(D, (Y != train_out))
         if Et > .5:
             # early return
@@ -48,7 +49,7 @@ def _adaboost(features, labels, base, max_iters):
     return H, A
 
 
-class boost_model(object):
+class boost_model(supervised_model):
     def __init__(self, H, A, names):
         self.H = H
         self.A = A

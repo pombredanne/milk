@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
 
@@ -15,14 +15,14 @@ __all__ = [
     'filterfeatures',
     'featureselector',
     'sda_filter',
+    'rank_corr',
+    'select_n_best',
     ]
-
-_TOLERANCE = 0
-_SIGNIFICANCE_IN = .15
-_SIGNIFICANCE_OUT = .15
 
 def _sweep(A, k, flag):
     Akk = A[k,k]
+    if Akk == 0:
+        Akk = 1.e-5
 
     # cross[i,j] = A[i,k] * A[k,j]
     cross = (A[:,k][:, np.newaxis] * A[k])
@@ -35,28 +35,36 @@ def _sweep(A, k, flag):
     B[k,k] = -1./Akk
     return B
 
-def sda(features, labels, tolerance=None, significance_in=None, significance_out=None):
+def sda(features, labels, tolerance=.01, significance_in=.05, significance_out=.05, loose=False):
     '''
-    features_idx = sda(features,labels)
+    features_idx = sda(features, labels, tolerance=.01, significance_in=.05, significance_out=.05)
 
-    Perform Stepwise Discriminant Analysis for feature selection
+    Stepwise Discriminant Analysis for feature selection
 
-    Pre filter the feature matrix to remove linearly dependent features
+    Pre-filter the feature matrix to remove linearly dependent features
     before calling this function. Behaviour is undefined otherwise.
 
-    This implements the algorithm described in
-    Jennrich, R.I. (1977), "Stepwise Regression" & "Stepwise Discriminant Analysis,"
-    both in Statistical Methods for Digital Computers, eds.
-    K. Enslein, A. Ralston, and H. Wilf, New York; John Wiley & Sons, Inc.
-    '''
-    import scipy.stats
+    This implements the algorithm described in Jennrich, R.I. (1977), "Stepwise
+    Regression" & "Stepwise Discriminant Analysis," both in Statistical Methods
+    for Digital Computers, eds.  K. Enslein, A. Ralston, and H. Wilf, New York;
+    John Wiley & Sons, Inc.
 
-    if tolerance is None:
-        tolerance = _TOLERANCE
-    if significance_in is None:
-        significance_in = _SIGNIFICANCE_IN
-    if significance_out is None:
-        significance_out = _SIGNIFICANCE_OUT
+    Parameters
+    ----------
+    features : ndarray
+        feature matrix. There should not be any perfectly correlated features.
+    labels : 1-array
+        labels
+    tolerance : float, optional
+    significance_in : float, optional
+    significance_out : float, optional
+
+    Returns
+    -------
+    features_idx : sequence
+        sequence of integer indices
+    '''
+    from scipy import stats
 
     assert len(features) == len(labels), 'milk.supervised.featureselection.sda: length of features not the same as length of labels'
     N, m = features.shape
@@ -72,9 +80,10 @@ def sda(features, labels, tolerance=None, significance_in=None, significance_out
     ignoreidx = ( W.diagonal() == 0 )
     if ignoreidx.any():
         idxs, = np.where(~ignoreidx)
-        F = sda(features[:,~ignoreidx],labels)
-        if len(F): return idxs[F]
-        return ignoreidx
+        if not len(idxs):
+            return np.arange(m)
+        selected = sda(features[:,~ignoreidx],labels)
+        return idxs[selected]
     output = []
     D = W.diagonal()
     df1 = q-1
@@ -90,7 +99,7 @@ def sda(features, labels, tolerance=None, significance_in=None, significance_out
             k = k[0]
             Fremove = (N-p-q+1)/(q-1)*(V_m-1)
             df2 = N-p-q+1
-            PrF = 1 - scipy.stats.f.cdf(Fremove,df1,df2)
+            PrF = 1 - stats.f.cdf(Fremove,df1,df2)
             if PrF > significance_out:
                 #print 'removing ',k, 'V(k)', 1./V_m, 'Fremove', Fremove, 'df1', df1, 'df2', df2, 'PrF', PrF
                 if k == last_enter_k:
@@ -108,19 +117,19 @@ def sda(features, labels, tolerance=None, significance_in=None, significance_out
             k = k[0]
             Fenter = (N-p-q)/(q-1) * (1-V_m)/V_m
             df2 = N-p-q
-            PrF = 1 - scipy.stats.f.cdf(Fenter,df1,df2)
+            PrF = 1 - stats.f.cdf(Fenter,df1,df2)
             if PrF < significance_in:
                 #print 'adding ',k, 'V(k)', 1./V_m, 'Fenter', Fenter, 'df1', df1, 'df2', df2, 'PrF', PrF
                 W = _sweep(W,k,-1)
                 T = _sweep(T,k,-1)
-                if PrF < .0001:
+                if loose or (PrF < 0.0001):
                     output.append((Fenter,k))
                 last_enter_k = k
                 continue
         break
 
     output.sort(reverse=True)
-    return np.array([x[1] for x in output])
+    return np.array([idx for _,idx in output])
 
 
 def linearly_independent_subset(V, threshold=1.e-5, return_orthogonal_basis=False):
@@ -195,14 +204,23 @@ class filterfeatures(object):
     '''
     selector = filterfeatures(idxs)
 
-    Returns a transformer which selects the features given
-     by idxs
+    Returns a transformer which selects the features given by idxs. I.e.,
+    ``apply(features)`` is equivalent to ``features[idxs]``
+
+    Parameters
+    ----------
+    idxs : ndarray
+        This can be either an array of integers (positions) or an array of booleans
     '''
     def __init__(self, idxs):
         self.idxs = idxs
 
     def apply(self, features):
         return features[self.idxs]
+
+    def apply_many(self, features):
+        features = np.asanyarray(features)
+        return features[:,self.idxs]
 
     def __repr__(self):
         return 'filterfeatures(%s)' % self.idxs
@@ -217,7 +235,7 @@ class featureselector(object):
     def __init__(self, selector):
         self.selector = selector
 
-    def train(self, features, labels, normalisedlabels=False):
+    def train(self, features, labels, **kwargs):
         idxs = self.selector(features, labels)
         if len(idxs) == 0:
             import warnings
@@ -230,4 +248,59 @@ class featureselector(object):
 
 def sda_filter():
     return featureselector(sda)
+
+def rank_corr(features, labels):
+    '''
+    rs = rank_corr(features, labels)
+
+    Computes the following expression::
+
+        rs[i] = max_e COV²(rank(features[:,i]), labels == e)
+
+    This is appropriate for numeric features and categorical labels.
+
+    Parameters
+    ----------
+    features : ndarray
+        feature matrix
+    labels : sequence
+
+    Returns
+    -------
+    rs : ndarray of float
+        rs are the rank correlations
+    '''
+    features = np.asanyarray(features)
+    labels = np.asanyarray(labels)
+
+    n = len(features)
+    ranks = features.argsort(0)
+    ranks = ranks.astype(float)
+    binlabels = np.array([(labels == ell) for ell in set(labels)], dtype=float)
+    mx = ranks.mean(0)
+    my = binlabels.mean(1)
+    sx = ranks.std(0)
+    sy = binlabels.std(1)
+
+    r = np.dot(binlabels,ranks)
+    r -= np.outer(n*my, mx)
+    r /= np.outer(sy, sx)
+    r /= n # Use n [instead of n-1] to match numpy's corrcoef
+    r **= 2
+    return r.max(0)
+
+class select_n_best(object):
+    '''
+    select_n_best(n, measure)
+
+    Selects the `n` features that score the highest in `measure`
+    '''
+    def __init__(self, n, measure):
+        self.n = n
+        self.measure = measure
+
+    def train(self, features, labels, **kwargs):
+        values = self.measure(features, labels)
+        values = values.argsort()
+        return filterfeatures(values[:self.n])
 

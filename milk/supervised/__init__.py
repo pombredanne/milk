@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
@@ -53,11 +53,16 @@ from .defaultclassifier import defaultclassifier, svm_simple
 from .classifier import normaliselabels
 from .gridsearch import gridsearch
 from .tree import tree_learner
+from .lasso import lasso, lasso_learner, lasso_model_walk, lasso_walk
 
 __all__ = [
     'normaliselabels',
     'defaultclassifier',
     'svm_simple',
     'gridsearch',
+    'lasso',
+    'lasso_learner',
+    'lasso_model_walk',
+    'lasso_walk',
     'tree_learner',
     ]

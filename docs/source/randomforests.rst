@@ -6,8 +6,9 @@ If you are not familiar with random forests, in general, `Wikipedia
 <http://en.wikipedia.org/wiki/Random_forest>`__ is a good place to start
 reading. The current article deals only with how to use them in **milk**.
 
-Random forests are *binary classifiers*, so you need to use a transformer to
-turn them into multi-class learners if you have multi-class data.
+Random forests as implemented in milk are *binary classifiers*, so you need to
+use a transformer to turn them into multi-class learners if you have
+multi-class data.
 
 ::
 
@@ -35,7 +36,7 @@ If you have `milksets <milksets.html>`__ installed, you can try it on one of its
 
 We can finally plot the results (mapped to 2 dimensions using PCA):
 
-.. plot:: ./../milk/demos/rf_wine_2d.py
+.. plot:: ../../milk/demos/rf_wine_2d.py
     :include-source:
 
 Colours indicate the classification output. A circle means that it matches the

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2011, Luis Pedro Coelho <lpc@cmu.edu>
+# Copyright (C) 2011-2012, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 # License: MIT. See COPYING.MIT file in the milk distribution
 '''
@@ -23,37 +23,9 @@ try:
     from jug import TaskGenerator, value
     from jug.utils import identity
     from jug.mapreduce import mapreduce
+    from jug.mapreduce import reduce as jug_reduce
 except ImportError:
-    raise ImportError('milk.ext.jugparallel requires jug (http://luispedro.org/software/jug')
-
-class _nfold_one(object):
-    def __init__(self, features, labels, kwargs):
-        self.features = features
-        self.labels = labels
-        self.kwargs = kwargs
-
-    def __call__(self, i):
-        return milk.nfoldcrossvalidation(
-                    value(self.features),
-                    value(self.labels),
-                    folds=[i],
-                    **value(self.kwargs))
-
-    def __jug_hash__(self):
-        # jug.hash is only available in jug 0.9
-        # This is also the first version that would call __jug_hash__
-        # So, we import it here only.
-        from jug import hash
-        M = hash.new_hash_object()
-        hash.hash_update(M,[
-            ('type', 'milk.nfoldcrossvalidation'),
-            ('features', self.features),
-            ('labels', self.labels),
-            ('kwargs', self.kwargs),
-            ])
-        hexdigest = M.hexdigest()
-        self.__jug_hash__ = lambda: hexdigest
-        return hexdigest
+    raise ImportError('milk.ext.jugparallel requires jug (http://luispedro.org/software/jug)')
 
 def _nfold_reduce(a,b):
     cmat = a[0] + b[0]
@@ -91,9 +63,12 @@ def nfoldcrossvalidation(features, labels, **kwargs):
     milk.nfoldcrossvalidation : The same functionality as a "normal" function
     jug.CompoundTask : This function can be used as argument to CompoundTask
     '''
-    mapper = _nfold_one(features, labels, kwargs)
     nfolds = kwargs.get('nfolds', 10)
-    return mapreduce(_nfold_reduce, mapper, range(nfolds), map_step=1, reduce_step=(nfolds+1))
+    features,labels = map(identity, (features,labels))
+    kwargs = dict( (k,identity(v)) for k,v in kwargs.iteritems())
+    nfold_one = TaskGenerator(milk.nfoldcrossvalidation)
+    mapped = [nfold_one(features, labels, folds=[i], **kwargs) for i in xrange(nfolds)]
+    return jug_reduce(_nfold_reduce, mapped)
 
 
 def _select_min(s0, s1):
@@ -125,7 +100,9 @@ def kmeans_select_best(features, ks, repeats=1, method='AIC', R=None, **kwargs):
     the best one according to ``method.``
 
     Note that, unlike a raw ``kmeans`` call, this is *always deterministic*
-    even if ``R=None``.
+    even if ``R=None`` (which is interpreted as being equivalent to setting it
+    to a fixed value). Otherwise, the jug paradigm would be broken as different
+    runs would give different results.
 
     Parameters
     ----------
@@ -138,7 +115,10 @@ def kmeans_select_best(features, ks, repeats=1, method='AIC', R=None, **kwargs):
     method : str, optional
         Which method to use. Must be one of 'AIC' (default) or 'BIC'.
     R : random number source, optional
-        If you do not pass a value, the result will be deterministic
+        Even you do not pass a value, the result will be deterministic. This is
+        different from the typical behaviour of ``R``, but, when using jug,
+        reproducibility is often but, when using jug, reproducibility is often
+        a desired feature.
     kwargs : other options
         These are passed transparently to ``kmeans``
 

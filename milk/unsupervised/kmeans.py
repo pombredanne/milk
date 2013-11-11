@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <lpc@cmu.edu>
+# Copyright (C) 2008-2013, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -30,6 +30,7 @@ from .normalise import zscore
 
 __all__ = [
         'kmeans',
+        'select_best_kmeans',
         'repeated_kmeans',
         ]
 
@@ -109,7 +110,7 @@ def residual_sum_squares(fmatrix,assignments,centroids,distance='euclidean',**kw
         residual sum squares
     '''
     if distance != 'euclidean':
-        raise NotImplemented, "residual_sum_squares only implemented for 'euclidean' distance"
+        raise NotImplemented("residual_sum_squares only implemented for 'euclidean' distance")
     rss = 0.0
     for k, c in enumerate(centroids):
         diff = fmatrix[assignments == k] - c
@@ -171,9 +172,11 @@ def _pycomputecentroids(fmatrix, centroids, assignments, counts):
             any_empty = True
     return any_empty
 
-def kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, **kwargs):
+def kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, return_assignments=True, return_centroids=True, centroids=None, **kwargs):
     '''
-    assignments, centroids = kmean(fmatrix, k, distance='euclidean', max_iter=1000, R=None, icov=None, covmat=None)
+    assignments, centroids = kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, icov=None, covmat=None)
+    centroids = kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, icov=None, covmat=None, return_assignments=False)
+    assignments= kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, icov=None, covmat=None, return_centroids=False)
 
     k-Means Clustering
 
@@ -193,6 +196,12 @@ def kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, **kwargs):
     max_iter : integer, optional
         Maximum number of iteration (default: 1000)
     R : source of randomness, optional
+    return_centroids : boolean, optional
+        Whether to return centroids (default: True)
+    return_assignments: boolean, optional
+        Whether to return centroid assignments (default: True)
+    centroids: ndarray (optional)
+        Initial centroids to use for clustering. If not supplied, centroids will be randomly initialized. 2-ndarray (k x Nfeatures)
 
     Returns
     -------
@@ -201,14 +210,19 @@ def kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, **kwargs):
     centroids : ndarray
         An array of `k'` centroids
     '''
+    if not (return_centroids or return_assignments):
+        return None
     fmatrix = np.asanyarray(fmatrix)
+    if not np.issubdtype(fmatrix.dtype, np.float):
+        fmatrix = fmatrix.astype(np.float)
     if distance == 'seuclidean':
         fmatrix = zscore(fmatrix)
         distance = 'euclidean'
     if distance == 'euclidean':
         def distfunction(fmatrix, cs, dists):
-            dists = _dot3(fmatrix, (-2)*cs.T, dists)
-            dists += np.array([np.dot(c,c) for c in cs])
+            dists = _dot3(fmatrix, cs.T, dists)
+            dists = np.multiply(dists, -2, dists)
+            dists += np.einsum('ij,ij->i', cs, cs)
             # For a distance, we'd need to add the fmatrix**2 components, but
             # it doesn't matter because we are going to perform an argmin() on
             # the result.
@@ -230,26 +244,39 @@ def kmeans(fmatrix, k, distance='euclidean', max_iter=1000, R=None, **kwargs):
         computecentroids = _kmeans.computecentroids
     else:
         computecentroids = _pycomputecentroids
-    R = get_pyrandom(R)
 
-    centroids = np.array(R.sample(fmatrix,k), fmatrix.dtype)
-    prev = np.zeros(len(fmatrix), np.int32)
+    R = get_pyrandom(R)
+    if centroids is not None:
+        if centroids.shape[0] != k:
+            raise ValueError('milk.unsupervised.kmeans `centroids` should contain `k` points')
+        if centroids.shape[1] != fmatrix.shape[1]:
+            raise ValueError('milk.unsupervised.kmeans `centroids` should have the same dimenionality as `fmatrix`')
+        centroids = np.asarray(centroids)
+    else:
+        centroids = np.array(R.sample(fmatrix,k), fmatrix.dtype)
+
+    N = len(fmatrix)
     counts = np.empty(k, np.int32)
+    prev = None
     dists = None
     for i in xrange(max_iter):
         dists = distfunction(fmatrix, centroids, dists)
         assignments = dists.argmin(1)
-        if np.all(assignments == prev):
+        if prev is not None and _kmeans.are_equal(assignments, prev):
             break
-        if computecentroids(fmatrix, centroids, assignments.astype(np.int32), counts):
+        if computecentroids(fmatrix, centroids, assignments.astype(np.int64, copy=False), counts):
             (empty,) = np.where(counts == 0)
             centroids = np.delete(centroids, empty, axis=0)
             k = len(centroids)
-            counts = np.empty(k, np.int32)
+            counts.resize((k,))
             # This will cause new matrices to be allocated in the next iteration
             dists = None
-        prev[:] = assignments
-    return assignments, centroids
+        prev = assignments
+    if return_centroids and return_assignments:
+        return assignments, centroids
+    elif return_centroids:
+        return centroids
+    return assignments
 
 def repeated_kmeans(fmatrix,k,iterations,distance='euclidean',max_iter=1000,R=None,**kwargs):
     '''
@@ -313,11 +340,13 @@ def select_best_kmeans(fmatrix, ks, repeats=1, method='AIC', R=None, **kwargs):
     best = None
     best_val = np.inf
     R = get_pyrandom(R)
-    from milk.unsupervised.gaussianmixture import AIC, BIC
+    from milk.unsupervised.gaussianmixture import AIC, BIC, log_likelihood
     if method == 'AIC':
         method = AIC
     elif method == 'BIC':
         method = BIC
+    elif method == 'loglike':
+        method = log_likelihood
     else:
         raise ValueError('milk.kmeans.select_best_kmeans: unknown method: %s' % method)
     if 'distance' in kwargs and kwargs['distance'] == 'seuclidean':

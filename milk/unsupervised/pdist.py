@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
@@ -44,7 +44,7 @@ def pdist(X, Y=None, distance='euclidean2'):
     D += y2
 
     # Because of numerical imprecision, we might get negative numbers
-    # (which cause problems down the road, .e.g., when doing the sqrt):
+    # (which cause problems down the road, e.g., when doing the sqrt):
     np.maximum(D, 0, D)
     if distance == 'euclidean':
         np.sqrt(D, D)
@@ -55,14 +55,27 @@ def plike(X, sigma2=None):
     '''
     L = plike(X, sigma2={guess based on X})
 
+    Compute likelihood that any two objects come from the same distribution
+    under a Gaussian distribution hypothesis::
+
+        L[i,j] = exp( ||X[i] - X[j]||^2 / sigma2 )
+
     Parameters
     ----------
-      X : feature matrix
-      sigma2 : bandwidth
+    X : ndarray
+        feature matrix
+    sigma2 : float, optional
+        bandwidth
 
     Returns
     -------
-      L : likelihood matrix
+    L : ndarray
+        likelihood matrix
+
+    See Also
+    --------
+    pdist : function
+        Compute distances between objects
     '''
 
     L = pdist(X)

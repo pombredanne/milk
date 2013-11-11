@@ -1,4 +1,5 @@
 import milk.supervised.featureselection
+from milk.supervised.featureselection import select_n_best, rank_corr
 import numpy as np
 def test_sda():
     from milksets import wine
@@ -38,3 +39,44 @@ def _slow_linear_independent_features(featmatrix):
             rank = nrank
             independent.append(i)
     return np.array(independent)
+
+
+def test_select_n():
+    from milksets.wine import load
+
+    features,labels = load()
+    for n in (1,2,4,8):
+        select = select_n_best(n, rank_corr)
+        model = select.train(features,labels)
+        f = model.apply(features[3])
+        assert len(f) == n
+
+def test_select_n():
+    from milksets.wine import load
+
+    features,labels = load()
+    for n in (1,2,4,8):
+        select = select_n_best(n, rank_corr)
+        model = select.train(features,labels)
+        f = model.apply(features[3])
+        assert len(f) == n
+
+def slow_rank_corr(features, labels):
+    features = np.asanyarray(features)
+    labels = np.asanyarray(labels)
+    binlabels = [(labels == ell) for ell in set(labels)]
+    rs = []
+    for feat in features.T:
+        ranks = feat.argsort()
+        corrcoefs = [np.corrcoef(ranks, labs)[0,1] for labs in binlabels]
+        corrcoefs = np.array(corrcoefs)
+        corrcoefs **= 2
+        rs.append(np.max(corrcoefs))
+    return np.array(rs)
+
+def test_compare_rank_corr():
+    from milksets.wine import load
+    features,labels = load()
+    r0 = rank_corr(features,labels)
+    r1 = slow_rank_corr(features,labels)
+    assert np.allclose(r0,r1)

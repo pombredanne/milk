@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,30 +22,10 @@
 
 from __future__ import division
 import numpy as np
+from .normalise import normaliselabels
+from .base import supervised_model
 
 __all__ = ['normaliselabels', 'ctransforms']
-
-def normaliselabels(labels):
-    '''
-    normalised, names = normaliselabels(labels)
-
-    Normalises the labels to be integers from 0 through N-1
-
-    `normalised` is a np.array, while `names` is a list mapping the indices to
-    the old names.
-
-    Parameters
-    ----------
-    labels : any iterable of labels
-
-    Returns
-    ------
-    normalised : a numpy ndarray of integers 0 .. N-1
-    names : list of label names
-    '''
-    names = sorted(set(labels))
-    normalised = map(names.index, labels)
-    return np.array(normalised), names
 
 class threshold_model(object):
     '''
@@ -69,7 +49,7 @@ class fixed_threshold_learner(object):
         return threshold_model(self.threshold)
 
 
-class ctransforms_model(object):
+class ctransforms_model(supervised_model):
     '''
     model = ctransforms_model(models)
 
@@ -81,6 +61,12 @@ class ctransforms_model(object):
     '''
     def __init__(self, models):
         self.models = models
+
+    def apply_many(self, features):
+        for m in self.models:
+            features = m.apply_many(features)
+        return features
+
     def apply(self,features):
         for T in self.models:
             features = T.apply(features)
@@ -96,13 +82,13 @@ class ctransforms(object):
         self.transforms = args
 
 
-    def train(self, features, labels, normalisedlabels=False):
+    def train(self, features, labels, **kwargs):
         models = []
         model = None
         for T in self.transforms:
             if model is not None:
                 features = np.array([model.apply(f) for f in features])
-            model = T.train(features, labels, normalisedlabels=normalisedlabels)
+            model = T.train(features, labels, **kwargs)
             models.append(model)
         return ctransforms_model(models)
 

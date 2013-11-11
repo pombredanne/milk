@@ -28,6 +28,8 @@ def test_one_against_one():
     tlabels = [M.apply(f) for f in features[100:]]
     for tl in tlabels:
         assert tl in labelset
+    tlabels_many = M.apply_many(features[100:])
+    assert np.all(tlabels == tlabels_many)
 
 def test_two_thirds():
     np.random.seed(2345)
@@ -58,4 +60,21 @@ def test_classifier_no_set_options():
     milk.supervised.multi.one_against_rest_multi(fast_classifier())
     milk.supervised.multi.one_against_rest(fast_classifier())
     milk.supervised.multi.one_against_one(fast_classifier())
+
+
+def test_tree():
+    mtree = milk.supervised.multi.multi_tree_learner(fast_classifier())
+    labels = [0,1,2,2,3,3,3,3]
+    features =  np.random.random_sample((len(labels), 8))
+    model = mtree.train(features, labels)
+    counts = np.zeros(4)
+    for ell in labels:
+        counts[ell] += 1
+
+    g0,g1 = milk.supervised.multi.split(counts)
+    assert np.all(g0 == [3]) or np.all(g1 == [3])
+    def r(m):
+        if len(m) == 1: return int(m[0])
+        else: return sorted([r(m[1]), r(m[2])])
+    assert r(model.model) == [3,[2,[0,1]]]
 

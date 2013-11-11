@@ -16,6 +16,7 @@ Decision tree based classifier
 from __future__ import division
 import numpy as np
 from .classifier import normaliselabels
+from .base import supervised_model
 
 __all__ = [
     'tree_learner',
@@ -47,7 +48,7 @@ def _split(features, labels, weights, criterion, subsample, R):
         features = features[:, samples]
         f = subsample
     best = None
-    best_val = -1.
+    best_val = float('-Inf')
     for i in xrange(f):
         domain_i = sorted(set(features[:,i]))
         for d in domain_i[1:]:
@@ -89,14 +90,23 @@ def z1_loss(labels0, labels1, weights0=None, weights1=None):
     z = z1_loss(labels0, labels1)
     z = z1_loss(labels0, labels1, weights0, weights1)
 
-    zero-one loss split for tree learning
+    zero-one loss
     '''
     def _acc(labels, weights):
         c = (labels.mean() > .5)
         if weights is not None:
-            return -np.dot((labels != c), weights)
-        return -np.sum(labels != c)
+            return np.dot((labels != c), weights)
+        return np.sum(labels != c)
     return _acc(labels0, weights0) + _acc(labels1, weights1)
+
+def neg_z1_loss(labels0, labels1, weights0=None, weights1=None):
+    '''
+    z = neg_z1_loss(labels0, labels1)
+    z = neg_z1_loss(labels0, labels1, weights0, weights1)
+
+    zero-one loss, with the sign reversed so it can be *maximised*.
+    '''
+    return -z1_loss(labels0,labels1,weights0,weights1)
 
 
 
@@ -197,7 +207,7 @@ class tree_learner(object):
 
 tree_classifier = tree_learner
 
-class tree_model(object):
+class tree_model(supervised_model):
     '''
     tree model
     '''
@@ -211,14 +221,17 @@ class tree_model(object):
             return value > .5
         return value
 
-class stump_model(object):
+class stump_model(supervised_model):
     def __init__(self, idx, cutoff, names):
         self.names = names
         self.idx = idx
         self.cutoff = cutoff
 
     def apply(self, f):
-        return self.names[f[self.idx] > self.cutoff]
+        value = f[self.idx] > self.cutoff
+        if self.names is not None:
+            return self.names[value]
+        return value
 
     def __repr__(self):
         return '<stump(%s, %s)>' % (self.idx, self.cutoff)
@@ -230,5 +243,11 @@ class stump_learner(object):
     def train(self, features, labels, normalisedlabels=False, weights=None, **kwargs):
         if not normalisedlabels:
             labels,names = normaliselabels(labels)
-        idx,cutoff = _split(features, labels, weights, z1_loss, subsample=None, R=None)
+        else:
+            names = kwargs.get('names')
+        split = _split(features, labels, weights, neg_z1_loss, subsample=None, R=None)
+        if split is None:
+            raise ValueError('milk.supervised.stump_learner: Unable to find split (all features are the same)')
+        idx,cutoff = split
         return stump_model(idx, cutoff, names)
+

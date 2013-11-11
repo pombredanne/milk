@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
 
 from __future__ import division
 from .classifier import normaliselabels, ctransforms_model
+from .base import supervised_model
 from collections import deque
 import numpy
 import numpy as np
@@ -29,7 +30,7 @@ __all__ = [
 def _svm_apply(SVM, q):
     '''
     f_i = _svm_apply(SVM, q)
-   
+
     @internal: This is mostly used for testing
     '''
     X,Y,Alphas,b,C,kernel=SVM
@@ -53,8 +54,8 @@ def svm_learn_smo(X,Y,kernel,C,eps=1e-4,tol=1e-2,cache_size=(1<<20)):
     Implements the Sequential Minimum Optimisation Algorithm from Platt's
         "Fast training of support vector machines using sequential minimal optimization"
         in Advances in kernel methods: support vector learning
-             Pages: 185 - 208   
-             Year of Publication: 1999 
+             Pages: 185 - 208
+             Year of Publication: 1999
              ISBN:0-262-19416-3
     '''
     assert numpy.all(numpy.abs(Y) == 1)
@@ -66,27 +67,46 @@ def svm_learn_smo(X,Y,kernel,C,eps=1e-4,tol=1e-2,cache_size=(1<<20)):
     _svm.eval_SMO(X,Y,Alphas0,params,kernel,cache_size)
     return Alphas0, params[0]
 
-def svm_learn_libsvm(X,Y,kernel,C,eps=1e-4,tol=1e-2,cache_size=(1<<20)):
+def svm_learn_libsvm(features, labels, kernel, C, eps=1e-4, tol=1e-2, cache_size=(1<<20), alphas=None):
     '''
     Learn a svm classifier using LIBSVM optimiser
-
-    X: data
-    Y: labels in SVM format (ie Y[i] in (1,-1))
 
     This is a very raw interface. In general, you should use a class
         like svm_classifier.
 
     This uses the LIBSVM optimisation algorithm
+
+    Parameters
+    ----------
+    X : ndarray
+        data
+    Y : ndarray
+        labels in SVM format (ie Y[i] in (1,-1))
+    kernel : kernel
+    C : float
+    eps : float, optional
+    tol : float, optional
+    cache_size : int, optional
+    alphas : ndarray, optional
+
+    Returns
+    -------
+    alphas : ndarray
+    b : float
     '''
-    assert numpy.all(numpy.abs(Y) == 1)
-    assert len(X) == len(Y)
-    N = len(Y)
-    Y = Y.astype(numpy.int32)
-    p = -numpy.ones(N,numpy.double)
-    params = numpy.array([0,C,eps,tol],numpy.double)
-    Alphas0 = numpy.zeros(N, numpy.double)
-    _svm.eval_LIBSVM(X,Y,Alphas0,p,params,kernel,cache_size)
-    return Alphas0, params[0]
+    if not np.all(np.abs(labels) == 1):
+        raise ValueError('milk.supervised.svm.svm_learn_libsvm: Y[i] != (-1,+1)')
+    assert len(features) == len(labels)
+    n = len(labels)
+    labels = labels.astype(np.int32)
+    p = -np.ones(n, np.double)
+    params = np.array([0,C,eps,tol], dtype=np.double)
+    if alphas is None:
+        alphas = np.zeros(n, np.double)
+    elif alphas.dtype != np.double or len(alphas) != n:
+        raise ValueError('milk.supervised.svm_learn_libsvm: alphas is in wrong format')
+    _svm.eval_LIBSVM(features, labels, alphas, p, params, kernel, cache_size)
+    return alphas, params[0]
 
 
 class preprocessed_rbf_kernel(object):
@@ -95,6 +115,14 @@ class preprocessed_rbf_kernel(object):
         self.Xsum = (X**2).sum(1)
         self.sigma = sigma
         self.beta = beta
+
+    def call_many(self, qs):
+        from milk.unsupervised import pdist
+        dists = pdist(self.X, qs, 'euclidean2')
+        dists /= -self.sigma
+        np.exp(dists, dists)
+        dists *= self.beta
+        return dists.T
 
     def __call__(self, q):
         minus_d2_sigma = np.dot(self.X,q)
@@ -126,6 +154,9 @@ class rbf_kernel(object):
         d2 = d2.sum()
         res = self.beta*np.exp(-d2/self.sigma)
         return res
+    def __str__(self):
+        return 'rbf_kernel(%s, %s)' % (self.sigma, self.beta)
+    __repr__ = __str__
 
     def preprocess(self, X):
         return preprocessed_rbf_kernel(X, self.sigma, self.beta)
@@ -166,6 +197,13 @@ class _call_kernel(object):
     def __call__(self, q):
         return np.array([self.kernel(s, q) for s in self.svs])
 
+class preprocessed_dot_kernel(object):
+    def __init__(self, svs):
+        self.svs = svs
+
+    def __call__(self, x1):
+        return np.dot(self.svs, x1)
+
 class dot_kernel(object):
     def __init__(self):
         self.kernel_nr_ = 2
@@ -174,7 +212,10 @@ class dot_kernel(object):
     def __call__(self, x0, x1):
         return np.dot(x0, x1)
 
-class svm_raw_model(object):
+    def preprocess(self, svs):
+        return preprocessed_dot_kernel(svs)
+
+class svm_raw_model(supervised_model):
     def __init__(self, svs, Yw, b, kernel):
         self.svs = svs
         self.Yw = Yw
@@ -184,6 +225,14 @@ class svm_raw_model(object):
             self.kernelfunction = self.kernel.preprocess(self.svs)
         except AttributeError:
             self.kernelfunction = _call_kernel(self.kernel, self.svs)
+
+    def apply_many(self, qs):
+        try:
+            qs = self.kernelfunction.call_many(qs)
+        except AttributeError:
+            qs = np.array(map(self.kernelfunction, qs))
+        return np.dot(qs, self.Yw) - self.b
+
 
     def apply(self, q):
         Q = self.kernelfunction(q)
@@ -198,15 +247,15 @@ class svm_raw(object):
 
     Parameters
     ----------
-    kernel : the kernel to use.
-             This should be a function that takes two data arguments
-             see rbf_kernel and polynomial_kernel.
-    C : the C parameter
-
-    Other Parameters
-    ----------------
-    eps : the precision to which to solve the problem (default 1e-3)
-    tol : (|x| < tol) is considered zero
+    kernel : callable
+        the kernel to use.  This should be a function that takes two data
+        arguments see rbf_kernel and polynomial_kernel.
+    C : float
+        the C parameter
+    eps : float, optional
+        the precision to which to solve the problem (default 1e-3)
+    tol : float, optional
+        (|x| < tol) is considered zero
     '''
     def __init__(self, kernel=None, C=1., eps=1e-3, tol=1e-8):
         self.C = C
@@ -216,13 +265,13 @@ class svm_raw(object):
         self.algorithm = 'libsvm'
 
 
-    def train(self, features, labels, normalisedlabels=False):
+    def train(self, features, labels, normalisedlabels=False, **kwargs):
         assert self.kernel is not None, 'milk.supervised.svm_raw.train: kernel not set!'
         assert self.algorithm in ('libsvm','smo'), 'milk.supervised.svm_raw: unknown algorithm (%s)' % self.algorithm
         assert not (np.isinf(self.C) or np.isnan(self.C)), 'milk.supervised.svm_raw: setting C to NaN or Inf causes problems.'
         features = np.asanyarray(features)
         if normalisedlabels:
-            Y = labels
+            Y = labels.copy()
         else:
             Y,_ = normaliselabels(labels)
         assert Y.max() == 1, 'milk.supervised.svm_raw can only handle binary problems'
@@ -244,7 +293,7 @@ class svm_raw(object):
         Y = Y[svsi]
         Yw = w * Y
         return svm_raw_model(svs, Yw, b, self.kernel)
-    
+
     def get_params(self):
         return self.C, self.eps,self.tol
 
@@ -284,17 +333,21 @@ def learn_sigmoid_constants(F,Y,
     Support Vector Machines" by Lin, Lin, and Weng.
     Machine Learning, Vol. 68, No. 3. (23 October 2007), pp. 267-276
     '''
-    # the deci[i] array is called F[i] in this code
+    # Below we use safe constructs to avoid using the overflown values, but we
+    # must compute them because of the way numpy works.
+    errorstate = np.seterr(over='ignore')
+
+    # the deci[i] array is called F in this code
     F = np.asanyarray(F)
     Y = np.asanyarray(Y)
     assert len(F) == len(Y)
     assert numpy.all( (Y == 1) | (Y == 0) )
-    from numpy import log, exp
-    N=len(F)
-    if max_iters is None: max_iters = 1000
+
+    if max_iters is None:
+        max_iters = 1000
 
     prior1 = Y.sum()
-    prior0 = N-prior1
+    prior0 = len(F)-prior1
 
     small_nr = 1e-4
 
@@ -304,47 +357,38 @@ def learn_sigmoid_constants(F,Y,
     T = Y*hi_t + (1-Y)*lo_t
 
     A = 0.
-    B = log( (prior0+1.)/(prior1+1.) )
+    B = np.log( (prior0+1.)/(prior1+1.) )
     def target(A,B):
-        fval = 0.
-        for i in xrange(N):
-            fApB = F[i]*A+B
-            if fApB >= 0:
-                fval += T[i]*fApB+log(1+exp(-fApB))
-            else:
-                fval += (T[i]-1.)*fApB+log(1+exp(fApB))
-        return fval
+        fApB = F*A + B
+        lef = np.log1p(np.exp(fApB))
+        lemf = np.log1p(np.exp(-fApB))
+        fvals = np.choose(fApB >= 0, ( T*fApB + lemf, (T-1.)*fApB + lef))
+        return np.sum(fvals)
+
     fval = target(A,B)
     for iter in xrange(max_iters):
-        h11=sigma
-        h22=sigma
-        h21=0.
-        g1=0.
-        g2=0.
-        for i in xrange(N):
-            fApB = F[i]*A+B
-            if (fApB >= 0):
-                p = exp(-fApB)/(1.+exp(-fApB))
-                q = 1./(1.+exp(-fApB))
-            else:
-                p = 1./(1.+exp(fApB))
-                q = exp(fApB)/(1.+exp(fApB))
-            d2 = p * q
-            h11 += F[i]*F[i]*d2
-            h22 += d2
-            h21 += F[i]*d2
-            d1 = T[i] - p
-            g1 += F[i]*d1
-            g2 += d1
+        fApB = F*A + B
+        ef = np.exp(fApB)
+        emf = np.exp(-fApB)
+
+        p = np.choose(fApB >= 0, ( emf/(1.+emf), 1./(1.+ef) ))
+        q = np.choose(fApB >= 0, ( 1/(1.+emf), ef/(1.+ef) ))
+        d2 = p * q
+        h11 = np.dot(F*F,d2) + sigma
+        h22 = np.sum(d2) + sigma
+        h21 = np.dot(F,d2)
+        d1 = T - p
+        g1 = np.dot(F,d1)
+        g2 = np.sum(d1)
         if abs(g1) < eps and abs(g2) < eps: # Stopping criteria
             break
-        
+
         det = h11*h22 - h21*h21
         dA = - (h22*g1 - h21*g2)/det
         dB = - (h21*g1 + h11*g2)/det
         gd = g1*dA + g2*dB
-        stepsize = 1.
 
+        stepsize = 1.
         while stepsize >= min_step:
             newA = A + stepsize*dA
             newB = B + stepsize*dB
@@ -355,12 +399,13 @@ def learn_sigmoid_constants(F,Y,
                 fval = newf
                 break
             stepsize /= 2
-        if stepsize < min_step:
+        else:
             print 'Line search fails'
             break
+    np.seterr(**errorstate)
     return A,B
 
-class svm_binary_model(object):
+class svm_binary_model(supervised_model):
     def __init__(self, classes):
         self.classes = classes
     def apply(self,f):
@@ -373,7 +418,7 @@ class svm_binary(object):
     assert model.apply(f) in labels
     '''
 
-    def train(self, features, labels, normalisedlabels=False):
+    def train(self, features, labels, normalisedlabels=False, **kwargs):
         if normalisedlabels:
             return svm_binary_model( (0,1) )
         assert len(labels) >= 2, 'Cannot train from a single example'
@@ -403,10 +448,10 @@ class svm_to_binary(object):
         '''
         self.base = svm_base
 
-    def train(self, features, labels, normalisedlabels=False):
-        model = self.base.train(features, labels, normalisedlabels=normalisedlabels)
+    def train(self, features, labels, **kwargs):
+        model = self.base.train(features, labels, **kwargs)
         binary = svm_binary()
-        binary_model = binary.train(features, labels, normalisedlabels=normalisedlabels)
+        binary_model = binary.train(features, labels, **kwargs)
         return ctransforms_model([model, binary_model])
 
     def set_option(self, opt, value):
@@ -414,7 +459,7 @@ class svm_to_binary(object):
 
 
 
-class svm_sigmoidal_correction_model(object):
+class svm_sigmoidal_correction_model(supervised_model):
     def __init__(self, A, B):
         self.A = A
         self.B = B
@@ -431,8 +476,8 @@ class svm_sigmoidal_correction(object):
     '''
     def __init__(self):
         self.max_iters = None
-    
-    def train(self, features, labels, normalisedlabels=False):
+
+    def train(self, features, labels, **kwargs):
         A,B = learn_sigmoid_constants(features,labels,self.max_iters)
         return svm_sigmoidal_correction_model(A, B)
 
@@ -449,7 +494,7 @@ def sigma_value_fisher(features,labels):
     value_s = f(s)
 
     Computes a function which computes how good the value of sigma
-    is for the features. This function should be *minimised* for a 
+    is for the features. This function should be *minimised* for a
     good value of sigma.
 
     Parameters
@@ -508,10 +553,10 @@ class fisher_tuned_rbf_svm(object):
         self.sigmas = sigmas
         self.base = base
 
-    def train(self, features, labels, normalisedlabels=False):
+    def train(self, features, labels, **kwargs):
         f = sigma_value_fisher(features, labels)
         fs = [f(s) for s in self.sigmas]
         self.sigma = self.sigmas[np.argmin(fs)]
         self.base.set_option('kernel',rbf_kernel(self.sigma))
-        return self.base.train(features,labels)
+        return self.base.train(features, labels, **kwargs)
 

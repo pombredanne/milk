@@ -8,7 +8,7 @@ from ..supervised.classifier import normaliselabels
 import numpy as np
 
 __all__ = ['foldgenerator', 'getfold', 'nfoldcrossvalidation']
-def foldgenerator(labels, nfolds=None, origins=None, folds=None):
+def foldgenerator(labels, nfolds=None, origins=None, folds=None, multi_label=False):
     '''
     for train,test in foldgenerator(labels, nfolds=None, origins=None)
         ...
@@ -36,7 +36,7 @@ def foldgenerator(labels, nfolds=None, origins=None, folds=None):
     -------
     iterator over `train, test`, two boolean arrays
     '''
-    labels,names = normaliselabels(labels)
+    labels,names = normaliselabels(labels,multi_label=multi_label)
     if origins is None:
         origins = np.arange(len(labels))
     else:
@@ -45,8 +45,12 @@ def foldgenerator(labels, nfolds=None, origins=None, folds=None):
              'milk.nfoldcrossvalidation.foldgenerator: origins must be of same size as labels')
         origins = np.asanyarray(origins)
     fmin = len(labels)
-    for lab in set(labels):
-        curmin = len(set(origins[labels == lab]))
+    for ell in xrange(len(names)):
+        if multi_label:
+            matching = (orig for i,orig in enumerate(origins) if labels[i,ell])
+        else:
+            matching = origins[labels == ell]
+        curmin = len(set(matching))
         fmin = min(fmin, curmin)
 
     if fmin == 1:
@@ -65,18 +69,28 @@ If you passed in an origins parameter, it might be caused by having a class come
         warn('milk.measures.nfoldcrossvalidation: Reducing the nr. of folds from %s to %s (minimum class size).' % (nfolds, fmin))
         nfolds = fmin
 
-    for lab in set(labels):
-        locations = (labels == lab)
-        usedorigins = np.unique(origins[locations])
-        weights = np.array([np.sum(origins == orig) for orig in usedorigins])
-        foldweight = np.zeros(nfolds, int)
-        for w,orig in sorted(zip(weights, usedorigins)):
-            f = np.argmin(foldweight)
-            if np.any(fold[origins == orig] > -1):
-                raise ValueError(
-                        'milk.nfoldcrossvalidation.foldgenerator: something is wrong. Maybe origin %s is present in two labels.' % orig)
-            fold[origins == orig] = f
-            foldweight[f] += w
+    if multi_label:
+        foldweight = np.zeros( (nfolds, len(names)), int)
+        for orig in np.unique(origins):
+            (locations,) = np.where(orig == origins)
+            weight = len(locations)
+            ell = labels[locations[0]]
+            f = np.argmin(foldweight[:,ell].sum(1))
+            fold[locations] = f
+            foldweight[f,ell] += weight
+    else:
+        for lab in set(labels):
+            locations = (labels == lab)
+            usedorigins = np.unique(origins[locations])
+            weights = np.array([np.sum(origins == orig) for orig in usedorigins])
+            foldweight = np.zeros(nfolds, int)
+            for w,orig in sorted(zip(weights, usedorigins)):
+                f = np.argmin(foldweight)
+                if np.any(fold[origins == orig] > -1):
+                    raise ValueError(
+                            'milk.nfoldcrossvalidation.foldgenerator: something is wrong. Maybe origin %s is present in two labels.' % orig)
+                fold[origins == orig] = f
+                foldweight[f] += w
 
     for f in xrange(nfolds):
         if folds is not None and f not in folds: continue
@@ -106,7 +120,7 @@ def getfold(labels, fold, nfolds=None, origins=None):
             return t,s
     raise ValueError('milk.getfold: Attempted to get fold %s but the number of actual folds was too small (%s)' % (fold,i))
 
-def nfoldcrossvalidation(features, labels, nfolds=None, learner=None, origins=None, return_predictions=False, folds=None, classifier=None):
+def nfoldcrossvalidation(features, labels, nfolds=None, learner=None, origins=None, return_predictions=False, folds=None, initial_measure=0, classifier=None,):
     '''
     Perform n-fold cross validation
 
@@ -137,6 +151,8 @@ def nfoldcrossvalidation(features, labels, nfolds=None, learner=None, origins=No
         whether to return predictions (default: False)
     folds : sequence of int, optional
         which folds to generate
+    initial_measure : any, optional
+        what initial value to use for the results reduction (default: 0)
 
 
     Returns
@@ -164,19 +180,28 @@ def nfoldcrossvalidation(features, labels, nfolds=None, learner=None, origins=No
         predictions = np.empty_like(labels)
         predictions.fill(-1) # This makes it clearer if there are bugs in the programme
 
-    features = np.asanyarray(features)
+    try:
+        features = np.asanyarray(features)
+    except:
+        features = np.asanyarray(features, dtype=object)
+
+    if origins is not None:
+        origins = np.asanyarray(origins)
 
     nclasses = labels.max() + 1
     results = []
     measure = confusion_matrix
+    train_kwargs = {}
     for trainingset,testingset in foldgenerator(labels, nfolds, origins=origins, folds=folds):
-        model = learner.train(features[trainingset], labels[trainingset])
+        if origins is not None:
+            train_kwargs = { 'corigins' : origins[trainingset] }
+        model = learner.train(features[trainingset], labels[trainingset], **train_kwargs)
         cur_preds = np.array([model.apply(f) for f in features[testingset]])
         if return_predictions:
             predictions[testingset] = cur_preds
         results.append(measure(labels[testingset], cur_preds))
 
-    result = reduce(operator.add, results)
+    result = reduce(operator.add, results, initial_measure)
     if return_predictions:
         return result, names, predictions
     return result, names

@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2011, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
 
 from __future__ import division
 import numpy as np
+from milk.supervised.base import supervised_model
 
 __all__ = [
     'defaultlearner',
@@ -13,15 +14,40 @@ __all__ = [
     'feature_selection_simple',
     ]
 
-def defaultlearner(mode='medium'):
+class default_learner(object):
+    def __init__(self, preproc, classifier, multi_adapter):
+        self.preproc = preproc
+        self.classifier = classifier
+        self.multi_adapter = preproc
+
+    def train(self, features, labels):
+        model = self.preproc.train(features, labels)
+        nfeatures = model.apply_many(features)
+        classifier = self.classifier
+        if len(set(labels)) > 2:
+            classifier = self.multi_adapter(classifier)
+        cmodel = classifier.train(nfeatures, labels)
+        return default_model(classifier, cmodel)
+
+class default_model(supervised_model):
+    def __init__(self, preproc, classify):
+        self.preproc = preproc
+        self.classify = classify
+
+    def apply(self, features):
+        features = self.preproc.apply(features)
+        return self.classify.apply(features)
+
+def defaultlearner(mode='medium', multi_strategy='1-vs-1', expanded=False):
     '''
     learner = defaultlearner(mode='medium')
 
     Return the default classifier learner
 
     This is an SVM based classifier using the 1-vs-1 technique for multi-class
-    problems. The features will be first cleaned up (normalised to [-1, +1])
-    and go through SDA feature selection.
+    problems (by default, see the ``multi_strategy`` parameter). The features
+    will be first cleaned up (normalised to [-1, +1]) and go through SDA
+    feature selection.
 
     Parameters
     -----------
@@ -29,10 +55,17 @@ def defaultlearner(mode='medium'):
         One of ('fast','medium','slow', 'really-slow'). This defines the speed
         accuracy trade-off. It essentially defines how large the SVM parameter
         range is.
+    multi_strategy : str, optional
+        One of ('1-vs-1', '1-vs-rest', 'ecoc'). This defines the strategy used
+        to convert the base binary classifier to a multi-class classifier.
+    expanded : boolean, optional
+        If true, then instead of a single learner, it returns a list of
+        possible learners.
 
     Returns
     -------
-    learner : classifier learner object
+    learner : classifier learner object or list
+        If `expanded`, then it returns a list
 
     See Also
     --------
@@ -52,10 +85,19 @@ def defaultlearner(mode='medium'):
     from . import svm
     from .normalise import chkfinite, interval_normalise
     from .featureselection import sda_filter, featureselector, linear_independent_features
-    from .multi import one_against_one
+    from .multi import one_against_one, one_against_rest, ecoc_learner
 
     assert mode in ('really-slow', 'slow', 'medium', 'fast'), \
         "milk.supervised.defaultlearner: mode must be one of 'fast','slow','medium'."
+    if multi_strategy == '1-vs-1':
+        multi_adaptor = one_against_one
+    elif multi_strategy == '1-vs-rest':
+        multi_adaptor = one_against_rest
+    elif multi_strategy == 'ecoc':
+        multi_adaptor = ecoc_learner
+    else:
+        raise ValueError('milk.supervised.defaultlearner: Unknown value for multi_strategy: %s' % multi_strategy)
+
     if mode == 'fast':
         c_range = np.arange(-2,4)
         sigma_range = np.arange(-2,3)
@@ -68,17 +110,17 @@ def defaultlearner(mode='medium'):
     else: # mode == 'slow'
         c_range = np.arange(-9,5)
         sigma_range = np.arange(-7,4)
-    return ctransforms(
-            chkfinite(),
-            interval_normalise(),
-            featureselector(linear_independent_features),
-            sda_filter(),
-            gridsearch(one_against_one(svm.svm_to_binary(svm.svm_raw())),
-                        params={
-                            'C': 2.**c_range,
-                            'kernel': [svm.rbf_kernel(2.**i) for i in sigma_range],
-                        }
-                        ))
+
+    kernels = [svm.rbf_kernel(2.**i) for i in sigma_range]
+    Cs = 2.**c_range
+
+    if expanded:
+        return [ctransforms(feature_selection_simple(),
+                    multi_adaptor(svm.svm_to_binary(svm.svm_raw(C=C, kernel=kernel))))
+                    for C in Cs for kernel in kernels]
+    return ctransforms(feature_selection_simple(),
+            gridsearch(multi_adaptor(svm.svm_to_binary(svm.svm_raw())),
+                        params={ 'C': Cs, 'kernel': kernels, }))
 
 
 def feature_selection_simple():

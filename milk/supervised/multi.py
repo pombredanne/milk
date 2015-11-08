@@ -49,11 +49,13 @@ class one_against_rest(base_adaptor):
 
 
     def train(self, features, labels, normalisedlabels=False):
-        labels, names = normaliselabels(labels)
-        nclasses = labels.max() + 1
+        nlabels, names = normaliselabels(labels)
+        nclasses = nlabels.max() + 1
+        if nclasses == 2:
+            return self.base.train(features, labels)
         models  = []
-        for i in xrange(nclasses):
-            model = self.base.train(features, (labels == i).astype(int), normalisedlabels=True)
+        for i in range(nclasses):
+            model = self.base.train(features, (nlabels == i).astype(int), normalisedlabels=True)
             models.append(model)
         return one_against_rest_model(models, names)
 
@@ -103,22 +105,25 @@ class one_against_one(base_adaptor):
         '''
         one_against_one.train(objs,labels)
         '''
-        labels, names = normaliselabels(labels)
+        nlabels, names = normaliselabels(labels)
+        nclasses = nlabels.max() + 1
+        if nclasses == 2:
+            return self.base.train(features, labels)
+
         if weights is not None:
             weights = np.asanyarray(weights)
         features = _asanyarray(features)
-        nclasses = labels.max() + 1
-        models = [ [None for i in xrange(nclasses)] for j in xrange(nclasses)]
+        models = [ [None for i in range(nclasses)] for j in range(nclasses)]
         child_kwargs = kwargs.copy()
         child_kwargs['normalisedlabels'] = True
-        for i in xrange(nclasses):
-            for j in xrange(i+1, nclasses):
-                idxs = (labels == i) | (labels == j)
+        for i in range(nclasses):
+            for j in range(i+1, nclasses):
+                idxs = (nlabels == i) | (nlabels == j)
                 if not np.any(idxs):
                     raise ValueError('milk.multi.one_against_one: Pair-wise classifier has no data')
                 if weights is not None:
                     child_kwargs['weights'] = weights[idxs]
-                model = self.base.train(features[idxs], (labels[idxs]==i).astype(int), **child_kwargs)
+                model = self.base.train(features[idxs], (nlabels[idxs]==i).astype(int), **child_kwargs)
                 models[i][j] = model
         return one_against_one_model(models, names)
 
@@ -132,8 +137,8 @@ class one_against_one_model(supervised_model):
     def apply_many(self, features):
         nc = self.nclasses
         votes = np.zeros((nc, len(features)))
-        for i in xrange(nc):
-            for j in xrange(i+1,nc):
+        for i in range(nc):
+            for j in range(i+1,nc):
                 vs = self.models[i][j].apply_many(features)
                 vs = _asanyarray(vs)
                 votes[i] += (vs > 0)
@@ -148,8 +153,8 @@ class one_against_one_model(supervised_model):
         '''
         nc = self.nclasses
         votes = np.zeros(nc)
-        for i in xrange(nc):
-            for j in xrange(i+1,nc):
+        for i in range(nc):
+            for j in range(i+1,nc):
                 c = self.models[i][j].apply(feats)
                 if c:
                     votes[i] += 1
@@ -162,7 +167,7 @@ class one_against_rest_multi_model(supervised_model):
         self.models = models
 
     def apply(self, feats):
-        return [lab for lab,model in self.models.iteritems() if model.apply(feats)]
+        return [lab for lab,model in self.models.items() if model.apply(feats)]
 
 class one_against_rest_multi(base_adaptor):
     '''
@@ -176,7 +181,6 @@ class one_against_rest_multi(base_adaptor):
     def train(self, features, labels, normalisedlabels=False, weights=None):
         '''
         '''
-        import operator
         all_labels = set()
         for ls in labels:
             all_labels.update(ls)
@@ -240,7 +244,7 @@ class ecoc_learner(base_adaptor):
         k = len(labelset)
         n = 2**(k-1)
         codes = np.zeros((k,n),bool)
-        for k_ in xrange(1,k):
+        for k_ in range(1,k):
             codes[k_].reshape( (-1, 2**(k-k_-1)) )[::2] = 1
         codes = ~codes
         # The last column of codes is not interesting (all 1s). The array is
@@ -305,24 +309,22 @@ class multi_tree_learner(base_adaptor):
 
     def train(self, features, labels, normalisedlabels=False, **kwargs):
         if not normalisedlabels:
-            labels,names = normaliselabels(labels)
-            labelset = np.arange(len(names))
+            nlabels,names = normaliselabels(labels)
         else:
-            labels = np.asanyarray(labels)
-            labelset = np.arange(labels.max()+1)
+            nlabels = np.asanyarray(labels)
 
 
         def recursive(labelset, counts):
             if len(labelset) == 1:
                 return labelset
             g0,g1 = split(counts)
-            nlabels = np.array([(ell in g0) for ell in labels], int)
-            model = self.base.train(features, nlabels, normaliselabels=True, **kwargs)
+            alabels = np.array([(ell in g0) for ell in nlabels], int)
+            model = self.base.train(features, alabels, normaliselabels=True, **kwargs)
             m0 = recursive(labelset[g0], counts[g0])
             m1 = recursive(labelset[g1], counts[g1])
             return (model, m0, m1)
-        counts = np.zeros(labels.max()+1)
-        for ell in labels:
+        counts = np.zeros(nlabels.max()+1)
+        for ell in nlabels:
             counts[ell] += 1
-        return multi_tree_model(recursive(np.arange(labels.max()+1), counts))
+        return multi_tree_model(recursive(np.arange(nlabels.max()+1), counts))
 

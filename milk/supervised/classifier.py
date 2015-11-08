@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2015, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -42,11 +42,19 @@ class threshold_model(object):
     def apply(self, f):
         return f >= self.threshold
 
+    def __repr__(self):
+        return 'threshold_model({})'.format(self.threshold)
+    __str__ = __repr__
+
 class fixed_threshold_learner(object):
     def __init__(self, threshold=.5):
         self.threshold = threshold
     def train(self, features, labels, **kwargs):
         return threshold_model(self.threshold)
+
+    def __repr__(self):
+        return 'fixed_threshold_learner({})'.format(self.threshold)
+    __str__ = __repr__
 
 
 class ctransforms_model(supervised_model):
@@ -63,9 +71,18 @@ class ctransforms_model(supervised_model):
         self.models = models
 
     def apply_many(self, features):
+        if len(features) == 0:
+            return features
         for m in self.models:
             features = m.apply_many(features)
         return features
+
+    def __repr__(self):
+        return 'ctransforms_model({})'.format(self.models)
+    __str__ = __repr__
+
+    def __getitem__(self, ix):
+        return self.models[ix]
 
     def apply(self,features):
         for T in self.models:
@@ -92,6 +109,10 @@ class ctransforms(object):
             models.append(model)
         return ctransforms_model(models)
 
+    def __repr__(self):
+        return 'ctransforms(*{})'.format(self.transforms)
+
+    __str__ = __repr__
 
     def set_option(self, opt, val):
         idx, opt = opt

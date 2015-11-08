@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2014, Luis Pedro Coelho <luis@luispedro.org>
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
 
 from __future__ import division
 import numpy as np
-from numpy.linalg import det
 from . classifier import normaliselabels
 
 __all__ = [
@@ -74,7 +73,7 @@ def sda(features, labels, tolerance=.01, significance_in=.05, significance_out=.
     df = features - features.mean(0)
     T = np.dot(df.T, df)
 
-    dfs = [(features[labels == i] - features[labels == i].mean(0)) for i in xrange(q)]
+    dfs = [(features[labels == i] - features[labels == i].mean(0)) for i in range(q)]
     W = np.sum(np.dot(d.T, d) for d in dfs)
 
     ignoreidx = ( W.diagonal() == 0 )
@@ -219,6 +218,8 @@ class filterfeatures(object):
         return features[self.idxs]
 
     def apply_many(self, features):
+        if len(features) == 0:
+            return features
         features = np.asanyarray(features)
         return features[:,self.idxs]
 

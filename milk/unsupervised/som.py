@@ -2,8 +2,8 @@
 # Copyright (C) 2010, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 # License: MIT. See COPYING.MIT file in the milk distribution
-
 from __future__ import division
+
 import numpy as np
 
 from ..utils import get_pyrandom
@@ -45,7 +45,7 @@ def putpoints(grid, points, L=.2, radius=4, iterations=1, shuffle=True, R=None):
         grid = grid.reshape(grid.shape+(1,))
     if shuffle:
         random = get_pyrandom(R)
-    for i in xrange(iterations):
+    for i in range(iterations):
         if shuffle:
             random.shuffle(points)
         _som.putpoints(grid, points, L, radius)
@@ -107,6 +107,6 @@ def som(data, shape, iterations=1000, L=.2, radius=4, R=None):
     d = data.shape[1]
     if data.dtype != np.float32:
         data = data.astype(np.float32)
-    grid = np.array(R.sample(data, np.product(shape))).reshape(shape + (d,))
+    grid = np.array(R.sample(list(data), np.product(shape))).reshape(shape + (d,))
     putpoints(grid, data, L=L, radius=radius, iterations=iterations, shuffle=True, R=R)
     return grid

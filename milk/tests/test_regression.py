@@ -3,13 +3,18 @@ import numpy as np
 import milk.supervised._svm
 from gzip import GzipFile
 from os import path
-import numpy as np
 from milksets.wine import load
 from milk.supervised import defaultclassifier
 import milk
 
 def test_svm_crash():
-    X,Y,kernel, C, eps ,tol, = pickle.load(GzipFile(path.dirname(__file__) + '/data/regression-2-Dec-2009.pp.gz'))
+    from sys import version_info
+    if version_info.major >= 3:
+        pickle_load = lambda f: pickle.load(f, encoding='latin1')
+    else:
+        pickle_load = pickle.load
+
+    X,Y,kernel, C, eps ,tol, = pickle_load(GzipFile(path.dirname(__file__) + '/data/regression-2-Dec-2009.pp.gz'))
     X = X[2:-2,:].copy()
     Y = Y[2:-2].copy()
     N = len(Y)

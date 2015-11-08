@@ -3,7 +3,7 @@ import random
 import milk.supervised.svm
 import milk.supervised.multi
 from milk.supervised.classifier import ctransforms
-from fast_classifier import fast_classifier
+from .fast_classifier import fast_classifier
 
 import milksets.wine
 features,labels = milksets.wine.load()
@@ -73,8 +73,12 @@ def test_tree():
 
     g0,g1 = milk.supervised.multi.split(counts)
     assert np.all(g0 == [3]) or np.all(g1 == [3])
+    def list_to_zero(v):
+        if isinstance(v, list):
+            return 1000
+        return v
     def r(m):
         if len(m) == 1: return int(m[0])
-        else: return sorted([r(m[1]), r(m[2])])
+        else: return sorted([r(m[1]), r(m[2])], key=list_to_zero)
     assert r(model.model) == [3,[2,[0,1]]]
 

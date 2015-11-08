@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2008-2012, Luis Pedro Coelho <luis@luispedro.org>
+# Copyright (C) 2008-2015, Luis Pedro Coelho <luis@luispedro.org>
 # vim: set ts=4 sts=4 sw=4 expandtab smartindent:
 #
 # License: MIT. See COPYING.MIT file in the milk distribution
@@ -7,10 +7,8 @@
 from __future__ import division
 from .classifier import normaliselabels, ctransforms_model
 from .base import supervised_model
-from collections import deque
 import numpy
 import numpy as np
-import random
 from . import _svm
 
 __all__ = [
@@ -36,7 +34,7 @@ def _svm_apply(SVM, q):
     X,Y,Alphas,b,C,kernel=SVM
     N = len(X)
     s = 0.0
-    for i in xrange(N):
+    for i in range(N):
         s += Alphas[i] * Y[i] * kernel(q, X[i])
     return s - b
 
@@ -182,12 +180,12 @@ class precomputed_kernel(object):
     A "fake" kernel which is precomputed.
     '''
     def __init__(self, kmatrix, copy=False):
-        kmatrix = np.ascontiguousarray(kmatrix, np.double, copy=copy)
+        self.kmatrix = np.ascontiguousarray(kmatrix, np.double, copy=copy)
         self.kernel_nr_ = 1
         self.kernel_arg_ = 0.
 
     def __call__(self, x0, x1):
-        return kmatrix[x0,x1]
+        return self.kmatrix[x0,x1]
 
 class _call_kernel(object):
     def __init__(self, k, svs):
@@ -230,7 +228,7 @@ class svm_raw_model(supervised_model):
         try:
             qs = self.kernelfunction.call_many(qs)
         except AttributeError:
-            qs = np.array(map(self.kernelfunction, qs))
+            qs = np.array(list(map(self.kernelfunction, qs)))
         return np.dot(qs, self.Yw) - self.b
 
 
@@ -349,8 +347,6 @@ def learn_sigmoid_constants(F,Y,
     prior1 = Y.sum()
     prior0 = len(F)-prior1
 
-    small_nr = 1e-4
-
     hi_t = (prior1+1.)/(prior1+2.)
     lo_t = 1./(prior0+2.)
 
@@ -366,7 +362,7 @@ def learn_sigmoid_constants(F,Y,
         return np.sum(fvals)
 
     fval = target(A,B)
-    for iter in xrange(max_iters):
+    for iter in range(max_iters):
         fApB = F*A + B
         ef = np.exp(fApB)
         emf = np.exp(-fApB)
@@ -400,7 +396,7 @@ def learn_sigmoid_constants(F,Y,
                 break
             stepsize /= 2
         else:
-            print 'Line search fails'
+            print('Line search fails')
             break
     np.seterr(**errorstate)
     return A,B
@@ -408,8 +404,12 @@ def learn_sigmoid_constants(F,Y,
 class svm_binary_model(supervised_model):
     def __init__(self, classes):
         self.classes = classes
+        self.raw = False
     def apply(self,f):
+        if self.raw:
+            return f
         return self.classes[f >= 0.]
+
 class svm_binary(object):
     '''
     classifier = svm_binary()

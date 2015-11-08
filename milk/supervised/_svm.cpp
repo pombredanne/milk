@@ -1,4 +1,4 @@
-// Copyright (C) 2008, Luis Pedro Coelho <luis@luispedro.org>
+// Copyright (C) 2008-2015, Luis Pedro Coelho <luis@luispedro.org>
 // Copyright (c) 2000-2008 Chih-Chung Chang and Chih-Jen Lin (LIBSVM Code)
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,10 +34,7 @@
 
 using std::vector;
 using std::list;
-extern "C" {
-    #include <Python.h>
-    #include <numpy/ndarrayobject.h>
-}
+#include "../utils/utils.h"
 
 
 namespace { 
@@ -347,14 +344,32 @@ double PrecomputedKernel::do_kernel(int i1, int i2) const {
     return *data;
 }
 
+
+long is_longint(PyObject* obj) {
+#if PY_MAJOR_VERSION >= 3
+    return PyLong_Check(obj);
+#else
+    return PyInt_Check(obj);
+#endif
+}
+
+long get_long(PyObject* obj) {
+#if PY_MAJOR_VERSION >= 3
+    return PyLong_AsLong(obj);
+#else
+    return PyInt_AsLong(obj);
+#endif
+}
+
 std::auto_ptr<KernelComputation> get_kernel(PyObject* X, PyObject* kernel) {
     typedef std::auto_ptr<KernelComputation> res_type;
     if (PyCallable_Check(kernel)) return res_type(new PyKernel(X, kernel, PySequence_Length(X)));
     if (!PyTuple_Check(kernel) || PyTuple_Size(kernel) != 2) throw SMO_Exception("Cannot parse kernel.");
     PyObject* type = PyTuple_GET_ITEM(kernel,0);
     PyObject* arg = PyTuple_GET_ITEM(kernel,1);
-    if (!PyInt_Check(type) || !PyFloat_Check(arg)) throw SMO_Exception("Cannot parse kernel (wrong types)");
-    long type_nr = PyInt_AsLong(type);
+    if (!is_longint(type)) throw SMO_Exception("Cannot parse kernel (first arg is not long)");
+    if (!PyFloat_Check(arg)) throw SMO_Exception("Cannot parse kernel (second arg is not float)");
+    long type_nr = get_long(type);
     double arg_value = PyFloat_AsDouble(arg);
     switch (type_nr) {
         case 0:
@@ -1159,10 +1174,6 @@ const char  * module_doc =
 
 } // namespace
 
-extern "C"
-void init_svm()
-  {
-    import_array();
-    (void)Py_InitModule3("_svm", methods, module_doc);
-  }
+
+DECLARE_MODULE(_svm)
 
